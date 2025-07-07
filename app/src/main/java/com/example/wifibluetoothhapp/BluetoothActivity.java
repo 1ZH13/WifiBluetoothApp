@@ -8,7 +8,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -31,9 +30,7 @@ public class BluetoothActivity extends AppCompatActivity {
     private Button btnToggleBluetooth, btnScanBluetooth, btnBack;
     private ArrayAdapter<String> adapter;
     private ArrayList<String> bluetoothDevicesList = new ArrayList<>();
-
     private final int PERMISSIONS_REQUEST_CODE = 101;
-    private SharedPreferences sharedPreferences;
 
     private final BroadcastReceiver bluetoothReceiver = new BroadcastReceiver() {
         @Override
@@ -43,13 +40,11 @@ public class BluetoothActivity extends AppCompatActivity {
 
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                if (device != null) {
-                    if (checkBluetoothConnectPermission()) {
-                        String deviceInfo = device.getName() + " - " + device.getAddress();
-                        if (!bluetoothDevicesList.contains(deviceInfo)) {
-                            bluetoothDevicesList.add(deviceInfo);
-                            adapter.notifyDataSetChanged();
-                        }
+                if (device != null && checkBluetoothConnectPermission()) {
+                    String deviceInfo = device.getName() + " - " + device.getAddress();
+                    if (!bluetoothDevicesList.contains(deviceInfo)) {
+                        bluetoothDevicesList.add(deviceInfo);
+                        adapter.notifyDataSetChanged();
                     }
                 }
             } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
@@ -68,7 +63,6 @@ public class BluetoothActivity extends AppCompatActivity {
         btnToggleBluetooth = findViewById(R.id.btn_toggle_bluetooth);
         btnScanBluetooth = findViewById(R.id.btn_scan_bluetooth);
         btnBack = findViewById(R.id.btn_back_bluetooth);
-        sharedPreferences = getSharedPreferences("MyPrefs", MODE_PRIVATE);
 
         adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, bluetoothDevicesList);
         listView.setAdapter(adapter);
@@ -78,10 +72,12 @@ public class BluetoothActivity extends AppCompatActivity {
                 Toast.makeText(this, "Bluetooth no está disponible en este dispositivo", Toast.LENGTH_SHORT).show();
                 return;
             }
+
             if (!checkBluetoothConnectPermission()) {
                 requestPermissions();
                 return;
             }
+
             if (bluetoothAdapter.isEnabled()) {
                 bluetoothAdapter.disable();
                 Toast.makeText(this, "Bluetooth desactivado", Toast.LENGTH_SHORT).show();
@@ -96,6 +92,7 @@ public class BluetoothActivity extends AppCompatActivity {
                 Toast.makeText(this, "Bluetooth está desactivado. Actívalo para buscar dispositivos.", Toast.LENGTH_SHORT).show();
                 return;
             }
+
             if (checkPermissions()) {
                 scanBluetoothDevices();
             } else {
@@ -112,31 +109,31 @@ public class BluetoothActivity extends AppCompatActivity {
         showPairedDevices();
     }
 
-    @SuppressLint("MissingPermission")
-    private void showPairedDevices() {
-        if (!checkBluetoothConnectPermission()) {
-            Toast.makeText(this, "Permiso BLUETOOTH_CONNECT requerido para mostrar dispositivos emparejados", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-        if (pairedDevices.size() > 0) {
-            for (BluetoothDevice device : pairedDevices) {
-                String deviceInfo = device.getName() + " - " + device.getAddress();
-                bluetoothDevicesList.add(deviceInfo);
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        unregisterReceiver(bluetoothReceiver);
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 1) {
+            if (resultCode == RESULT_OK) {
+                Toast.makeText(this, "Bluetooth activado", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Bluetooth no fue activado", Toast.LENGTH_SHORT).show();
             }
-            adapter.notifyDataSetChanged();
         }
     }
 
     private boolean checkPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
-            return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-                    && ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                    && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         } else {
-            return true;
+            return ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
     }
 
@@ -169,27 +166,36 @@ public class BluetoothActivity extends AppCompatActivity {
         Toast.makeText(this, "Buscando dispositivos Bluetooth...", Toast.LENGTH_SHORT).show();
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        unregisterReceiver(bluetoothReceiver);
+    @SuppressLint("MissingPermission")
+    private void showPairedDevices() {
+        if (!checkBluetoothConnectPermission()) {
+            Toast.makeText(this, "Permiso requerido para mostrar dispositivos emparejados", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+        for (BluetoothDevice device : pairedDevices) {
+            String deviceInfo = device.getName() + " - " + device.getAddress();
+            bluetoothDevicesList.add(deviceInfo);
+        }
+        adapter.notifyDataSetChanged();
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode,@NonNull String[] permissions,@NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if(requestCode == PERMISSIONS_REQUEST_CODE) {
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
             boolean granted = true;
-            for(int result : grantResults){
-                if(result != PackageManager.PERMISSION_GRANTED){
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
                     granted = false;
                     break;
                 }
             }
-            if(granted) {
+            if (granted) {
                 scanBluetoothDevices();
             } else {
-                Toast.makeText(this, "Permisos necesarios para Bluetooth no concedidos", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Permisos necesarios no concedidos", Toast.LENGTH_SHORT).show();
             }
         }
     }
