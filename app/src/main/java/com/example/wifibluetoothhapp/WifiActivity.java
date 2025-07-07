@@ -233,10 +233,10 @@ public class WifiActivity extends AppCompatActivity {
         String[] options = {"Desconectar", "Olvidar red"};
         optionsBuilder.setItems(options, (dialog, which) -> {
             switch (which) {
-                case 0: // Desconectar
+                case 0:
                     disconnectFromNetwork(result.SSID);
                     break;
-                case 1: // Olvidar
+                case 1:
                     sharedPreferences.edit().remove(result.SSID).apply();
                     forgetWifiNetwork(result.SSID);
                     Toast.makeText(this, "Red olvidada: " + result.SSID, Toast.LENGTH_SHORT).show();
@@ -440,7 +440,6 @@ public class WifiActivity extends AppCompatActivity {
         }
         if (!found) {
             Toast.makeText(this, "Red no encontrada en configuraciones", Toast.LENGTH_SHORT).show();
-            // Volver a habilitar el botón
             btnScanWifi.setEnabled(true);
             btnScanWifi.setAlpha(1.0f);
             return;
@@ -451,6 +450,20 @@ public class WifiActivity extends AppCompatActivity {
             btnScanWifi.setAlpha(1.0f);
             scanWifiNetworks();
         }, 3000);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (!wifiManager.isWifiEnabled()) {
+                adapter.clear();
+                displayScanResults.clear();
+                adapter.notifyDataSetChanged();
+                Toast.makeText(this, "WiFi Apagado", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     @Override
