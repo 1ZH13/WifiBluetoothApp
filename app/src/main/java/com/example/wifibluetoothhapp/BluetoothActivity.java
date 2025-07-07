@@ -15,7 +15,10 @@ import android.os.Bundle;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
+import android.view.View;
+import android.os.Handler;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -27,13 +30,16 @@ import java.util.Set;
 public class BluetoothActivity extends AppCompatActivity {
 
     private BluetoothAdapter bluetoothAdapter;
-    private ListView listView;
+    private TextView tvDeviceName;
     private Button btnToggleBluetooth, btnScanBluetooth, btnBack;
-    private ArrayAdapter<String> adapter;
-    private ArrayList<String> bluetoothDevicesList = new ArrayList<>();
-
+    private ListView listPairedDevices, listDiscoveredDevices;
+    private ArrayAdapter<String> pairedAdapter, discoveredAdapter;
+    private ArrayList<String> pairedList = new ArrayList<>();
+    private ArrayList<String> discoveredList = new ArrayList<>();
     private final int PERMISSIONS_REQUEST_CODE = 101;
-    private SharedPreferences sharedPreferences;
+    private Handler autoBluetoothScanHandler = new Handler();
+    private Runnable autoBluetoothScanRunnable;
+
 
     private final BroadcastReceiver bluetoothReceiver = new BroadcastReceiver() {
         @Override
@@ -43,13 +49,11 @@ public class BluetoothActivity extends AppCompatActivity {
 
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                if (device != null) {
-                    if (checkBluetoothConnectPermission()) {
-                        String deviceInfo = device.getName() + " - " + device.getAddress();
-                        if (!bluetoothDevicesList.contains(deviceInfo)) {
-                            bluetoothDevicesList.add(deviceInfo);
-                            adapter.notifyDataSetChanged();
-                        }
+                if (device != null && checkBluetoothConnectPermission()) {
+                    String deviceInfo = device.getName() + " - " + device.getAddress();
+                    if (!discoveredList.contains(deviceInfo)) {
+                        discoveredList.add(deviceInfo);
+                        discoveredAdapter.notifyDataSetChanged();
                     }
                 }
             } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
@@ -58,46 +62,94 @@ public class BluetoothActivity extends AppCompatActivity {
         }
     };
 
+    @SuppressLint("MissingPermission")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_bluetooth);
 
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        listView = findViewById(R.id.list_bluetooth_devices);
+
+        tvDeviceName = findViewById(R.id.tv_device_name);
         btnToggleBluetooth = findViewById(R.id.btn_toggle_bluetooth);
         btnScanBluetooth = findViewById(R.id.btn_scan_bluetooth);
         btnBack = findViewById(R.id.btn_back_bluetooth);
-        sharedPreferences = getSharedPreferences("MyPrefs", MODE_PRIVATE);
+        listPairedDevices = findViewById(R.id.list_bluetooth_devices);
+        listDiscoveredDevices = findViewById(R.id.list_discovered_devices);
 
-        adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, bluetoothDevicesList);
-        listView.setAdapter(adapter);
+        pairedAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, pairedList) {
+            @Override
+            public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                View view = super.getView(position, convertView, parent);
+                TextView textView = view.findViewById(android.R.id.text1);
+
+                String item = getItem(position);
+                String lastDevice = getSharedPreferences("BT_PREFS", MODE_PRIVATE).getString("last_device", "");
+
+                if (item != null && item.contains(lastDevice)) {
+                    textView.setTextColor(getResources().getColor(android.R.color.holo_blue_light));
+                    textView.setTypeface(null, android.graphics.Typeface.BOLD);
+                } else {
+                    textView.setTextColor(getResources().getColor(android.R.color.white));
+                    textView.setTypeface(null, android.graphics.Typeface.NORMAL);
+                }
+
+                return view;
+            }
+        };
+        discoveredAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, discoveredList);
+        listPairedDevices.setAdapter(pairedAdapter);
+        listPairedDevices.setOnItemClickListener((parent, view, position, id) -> {
+            String selected = pairedList.get(position).replace(" (Guardado)", "").trim();
+            SharedPreferences.Editor editor = getSharedPreferences("BT_PREFS", MODE_PRIVATE).edit();
+            editor.putString("last_device", selected);
+            editor.apply();
+
+            Toast.makeText(this, "Seleccionado: " + selected, Toast.LENGTH_SHORT).show();
+
+        });
+
+        listDiscoveredDevices.setAdapter(discoveredAdapter);
+
+        if (bluetoothAdapter != null) {
+            String deviceName = bluetoothAdapter.getName();
+            tvDeviceName.setText("Nombre del dispositivo: \"" + deviceName + "\"");
+            tvDeviceName.setTextColor(getResources().getColor(android.R.color.holo_blue_light));
+        } else {
+            tvDeviceName.setText("Bluetooth no disponible");
+        }
 
         btnToggleBluetooth.setOnClickListener(v -> {
             if (bluetoothAdapter == null) {
-                Toast.makeText(this, "Bluetooth no está disponible en este dispositivo", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Bluetooth no disponible", Toast.LENGTH_SHORT).show();
                 return;
             }
+
             if (!checkBluetoothConnectPermission()) {
                 requestPermissions();
                 return;
             }
+
             if (bluetoothAdapter.isEnabled()) {
-                bluetoothAdapter.disable();
-                Toast.makeText(this, "Bluetooth desactivado", Toast.LENGTH_SHORT).show();
+                Intent panelIntent = new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS);
+                startActivity(panelIntent);
             } else {
                 Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
                 startActivityForResult(enableBtIntent, 1);
             }
         });
 
+
         btnScanBluetooth.setOnClickListener(v -> {
             if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
-                Toast.makeText(this, "Bluetooth está desactivado. Actívalo para buscar dispositivos.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Bluetooth desactivado. Actívalo para buscar dispositivos.", Toast.LENGTH_SHORT).show();
                 return;
             }
             if (checkPermissions()) {
-                scanBluetoothDevices();
+                discoveredList.clear();
+                discoveredAdapter.notifyDataSetChanged();
+                bluetoothAdapter.startDiscovery();
+                Toast.makeText(this, "Buscando dispositivos Bluetooth...", Toast.LENGTH_SHORT).show();
             } else {
                 requestPermissions();
             }
@@ -105,9 +157,24 @@ public class BluetoothActivity extends AppCompatActivity {
 
         btnBack.setOnClickListener(v -> finish());
 
+        // Registrar receiver
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
         filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
         registerReceiver(bluetoothReceiver, filter);
+        autoBluetoothScanRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (bluetoothAdapter != null && bluetoothAdapter.isEnabled() && checkPermissions()) {
+                    if (bluetoothAdapter.isDiscovering()) {
+                        bluetoothAdapter.cancelDiscovery();
+                    }
+                    bluetoothAdapter.startDiscovery();
+                }
+                autoBluetoothScanHandler.postDelayed(this, 20000);
+            }
+        };
+
+        autoBluetoothScanHandler.postDelayed(autoBluetoothScanRunnable, 5000);
 
         showPairedDevices();
     }
@@ -115,24 +182,37 @@ public class BluetoothActivity extends AppCompatActivity {
     @SuppressLint("MissingPermission")
     private void showPairedDevices() {
         if (!checkBluetoothConnectPermission()) {
-            Toast.makeText(this, "Permiso BLUETOOTH_CONNECT requerido para mostrar dispositivos emparejados", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Permiso BLUETOOTH_CONNECT requerido", Toast.LENGTH_SHORT).show();
             return;
         }
+
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-        if (pairedDevices.size() > 0) {
+        pairedList.clear();
+
+        SharedPreferences prefs = getSharedPreferences("BT_PREFS", MODE_PRIVATE);
+        String lastConnected = prefs.getString("last_device", null);
+
+        ArrayList<String> reorderedList = new ArrayList<>();
+        if (pairedDevices != null && pairedDevices.size() > 0) {
             for (BluetoothDevice device : pairedDevices) {
-                String deviceInfo = device.getName() + " - " + device.getAddress();
-                bluetoothDevicesList.add(deviceInfo);
+                String info = device.getName() + " - " + device.getAddress();
+                if (info.equals(lastConnected)) {
+                    reorderedList.add(0, info + " (Guardado)");
+                } else {
+                    reorderedList.add(info + " (Guardado)");
+                }
             }
-            adapter.notifyDataSetChanged();
+            pairedList.addAll(reorderedList);
+            pairedAdapter.notifyDataSetChanged();
         }
+
     }
 
     private boolean checkPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
-            return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-                    && ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                    && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             return ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         } else {
@@ -161,35 +241,28 @@ public class BluetoothActivity extends AppCompatActivity {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private void scanBluetoothDevices() {
-        bluetoothDevicesList.clear();
-        adapter.notifyDataSetChanged();
-        bluetoothAdapter.startDiscovery();
-        Toast.makeText(this, "Buscando dispositivos Bluetooth...", Toast.LENGTH_SHORT).show();
-    }
-
     @Override
     protected void onDestroy() {
         super.onDestroy();
         unregisterReceiver(bluetoothReceiver);
+        autoBluetoothScanHandler.removeCallbacks(autoBluetoothScanRunnable);
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode,@NonNull String[] permissions,@NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if(requestCode == PERMISSIONS_REQUEST_CODE) {
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
             boolean granted = true;
-            for(int result : grantResults){
-                if(result != PackageManager.PERMISSION_GRANTED){
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
                     granted = false;
                     break;
                 }
             }
-            if(granted) {
-                scanBluetoothDevices();
+            if (granted) {
+                Toast.makeText(this, "Permisos otorgados", Toast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(this, "Permisos necesarios para Bluetooth no concedidos", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Permisos necesarios no concedidos", Toast.LENGTH_SHORT).show();
             }
         }
     }
